@@ -237,7 +237,7 @@ async function deleteRedisAuthCacheEntry(keyHash: unknown): Promise<void> {
   try {
     const { getRedisClient, isRedisConfigured } = await import("@/shared/utils/rateLimiter");
     if (!isRedisConfigured()) return;
-    const redis = getRedisClient();
+    const redis = await getRedisClient();
     await redis.del(`auth:api_key:${keyHash}`);
   } catch {
     // Redis is an optimization for auth caching; SQLite remains authoritative.
@@ -1126,7 +1126,7 @@ export async function validateApiKey(key: string | null | undefined) {
     try {
       const { getRedisClient, isRedisConfigured } = await import("@/shared/utils/rateLimiter");
       if (isRedisConfigured()) {
-        const redis = getRedisClient();
+        const redis = await getRedisClient();
         const redisKey = `auth:api_key:${hashedKey}`;
         const redisData = await redis.get(redisKey);
         if (redisData) {
@@ -1179,7 +1179,7 @@ export async function validateApiKey(key: string | null | undefined) {
     try {
       const { getRedisClient, isRedisConfigured } = await import("@/shared/utils/rateLimiter");
       if (isRedisConfigured()) {
-        const redis = getRedisClient();
+        const redis = await getRedisClient();
         const redisKey = `auth:api_key:${hashedKey}`;
         await redis.set(
           redisKey,
