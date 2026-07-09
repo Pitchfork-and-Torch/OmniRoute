@@ -1098,7 +1098,7 @@ test("buildKiroPayload enables thinking mode for Claude models via reasoning_eff
     max_tokens: 64000,
   };
 
-  const result = buildKiroPayload("claude-opus-4.8", body, false, null);
+  const result = buildKiroPayload("claude-sonnet-5", body, false, null); // only Kiro model accepting adaptive thinking (#6576)
 
   assert.ok(result.additionalModelRequestFields, "additionalModelRequestFields must be set");
   assert.deepEqual(result.additionalModelRequestFields.thinking, {
@@ -1126,7 +1126,7 @@ test("buildKiroPayload drops temperature when thinking is enabled", () => {
     temperature: 0.5,
   };
 
-  const result = buildKiroPayload("claude-opus-4.8", body, false, null);
+  const result = buildKiroPayload("claude-sonnet-5", body, false, null);
 
   assert.ok(result.additionalModelRequestFields, "thinking must be enabled");
   assert.equal(
@@ -1157,7 +1157,7 @@ test("buildKiroPayload maps body.thinking budget_tokens to effort level", () => 
     thinking: { type: "enabled", budget_tokens: 50000 },
   };
 
-  const result = buildKiroPayload("claude-opus-4.7", body, false, null);
+  const result = buildKiroPayload("claude-sonnet-5", body, false, null);
 
   assert.ok(result.additionalModelRequestFields, "thinking must be enabled from budget_tokens");
   assert.equal(result.additionalModelRequestFields.output_config.effort, "high");
@@ -1189,7 +1189,7 @@ test("buildKiroPayload maps reasoning_effort to the same Kiro effort level (no +
 
 test("buildKiroPayload reads effort from Anthropic output_config.effort", () => {
   const result = buildKiroPayload(
-    "claude-opus-4.8",
+    "claude-sonnet-5",
     { messages: [{ role: "user", content: "hard" }], output_config: { effort: "xhigh" } },
     false,
     null
@@ -1201,7 +1201,7 @@ test("buildKiroPayload reads effort from Anthropic output_config.effort", () => 
 
 test("buildKiroPayload defaults adaptive thinking (no effort) to high", () => {
   const result = buildKiroPayload(
-    "claude-opus-4.8",
+    "claude-sonnet-5",
     { messages: [{ role: "user", content: "hard" }], thinking: { type: "adaptive" } },
     false,
     null
@@ -1216,7 +1216,7 @@ test("buildKiroPayload defaults adaptive thinking (no effort) to high", () => {
 
 test("buildKiroPayload drops both temperature and top_p when thinking is enabled", () => {
   const result = buildKiroPayload(
-    "claude-opus-4.8",
+    "claude-sonnet-5",
     {
       messages: [{ role: "user", content: "hard" }],
       reasoning_effort: "high",
