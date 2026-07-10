@@ -160,6 +160,12 @@ async function solvePow(challenge: PowChallenge): Promise<string> {
 
 // ── SSE Transform (DeepSeek → OpenAI) ───────────────────────────────────
 
+/** How long to wait after DeepSeek `response/status=FINISHED` for trailing
+ * search_results before closing the OpenAI-compatible SSE. Without this,
+ * upstreams that leave the HTTP body open hang OpenAI SDK clients that wait
+ * for `data: [DONE]` after `finish_reason: stop` (#6777). */
+const DEEPSEEK_FINISHED_DRAIN_MS = 750;
+
 function transformSSE(deepseekStream: ReadableStream, model: string): ReadableStream {
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
@@ -176,6 +182,8 @@ function transformSSE(deepseekStream: ReadableStream, model: string): ReadableSt
       async start(controller) {
         const reader = deepseekStream.getReader();
         let buffer = "";
+        let streamFinished = false;
+        let finishedDrainTimer: ReturnType<typeof setTimeout> | null = null;
 
         const emit = (obj: object) => {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
@@ -198,16 +206,40 @@ function transformSSE(deepseekStream: ReadableStream, model: string): ReadableSt
           }
         };
 
-        const finishStream = () => {
-          const citations = appendSearchCitations(searchResults, streamModel);
-          if (citations) {
-            ensureRole();
-            chunk({ content: `\n\n${citations}` });
+        const clearFinishedDrain = () => {
+          if (finishedDrainTimer) {
+            clearTimeout(finishedDrainTimer);
+            finishedDrainTimer = null;
           }
-          ensureRole();
-          chunk({}, "stop");
-          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-          controller.close();
+        };
+
+        const finishStream = () => {
+          if (streamFinished) return;
+          streamFinished = true;
+          clearFinishedDrain();
+          try {
+            const citations = appendSearchCitations(searchResults, streamModel);
+            if (citations) {
+              ensureRole();
+              chunk({ content: `\n\n${citations}` });
+            }
+            ensureRole();
+            chunk({}, "stop");
+            // OpenAI-compatible clients (SDK, OpenCode) hang without this terminator.
+            controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+            controller.close();
+          } catch {
+            // Controller may already be closed if the client cancelled.
+          }
+        };
+
+        /** After FINISHED, allow a short window for trailing search_results, then close. */
+        const scheduleFinishAfterDrain = () => {
+          clearFinishedDrain();
+          finishedDrainTimer = setTimeout(() => {
+            finishedDrainTimer = null;
+            finishStream();
+          }, DEEPSEEK_FINISHED_DRAIN_MS);
         };
 
         const sendByPath = (raw: string) => {
@@ -324,18 +356,34 @@ function transformSSE(deepseekStream: ReadableStream, model: string): ReadableSt
                 }
               }
 
-              // Do not close on FINISHED — DeepSeek may still send search_results afterward.
+              // Do not close *immediately* on FINISHED — DeepSeek may still send
+              // search_results afterward. Schedule a short drain, then always emit
+              // stop + [DONE] so clients do not hang if the upstream body stays open.
               if (p === "response/status" && v === "FINISHED") {
+                scheduleFinishAfterDrain();
                 continue;
+              }
+
+              // Any other post-FINISHED payload extends the drain window so we
+              // still capture late search_results before closing.
+              if (finishedDrainTimer) {
+                scheduleFinishAfterDrain();
               }
             }
           }
         } catch (err) {
-          controller.error(err);
+          clearFinishedDrain();
+          if (!streamFinished) {
+            controller.error(err);
+          }
           return;
         }
 
         finishStream();
+      },
+      cancel() {
+        // Best-effort: cancel upstream reader if the client aborts mid-stream.
+        // finishStream is not required here — the controller is already cancelled.
       },
     },
     { highWaterMark: 16384 }
